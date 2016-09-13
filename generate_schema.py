@@ -1,9 +1,12 @@
+#!/usr/bin/env python
 import argparse
 from collections import OrderedDict
 from copy import deepcopy
 from math import ceil
 import pandas as pd
 import rtyaml
+from sys import stdout
+
 # from sys import stdout
 
 
@@ -19,6 +22,9 @@ def get_schema(df):
         name: id
         type: integer
     }
+
+    Modifies df to turn object into string
+
     """
     fields = []
     for n, dt in enumerate(df.dtypes):
@@ -37,6 +43,7 @@ def get_schema(df):
             f['type'] = 'boolean'
         else:
             f['type'] = 'string'
+            df[f['name']] = df[f['name']].astype(str)
         fields.append(f)
     return fields
 
@@ -61,7 +68,7 @@ def get_lengths(df, schema):
 
         elif field['type'] == 'integer':
             col = df[field['name']]
-            vals = col[col.notnull()]
+            vals = col[col.notnull()].dropna()
             maxlen = ceil(int(vals.max()) ** (1/8))
             if int(vals.min()) < 0:
                 field['unsigned'] = False
@@ -70,12 +77,19 @@ def get_lengths(df, schema):
 
         elif field['type'] == 'float':
             col = df[field['name']]
-            strvals = col[col.notnull()].astype(str).str.extract('(-?)(\d+)\.(\d+)', expand=True)
+            strvals = col[col.notnull()].dropna().astype(str).str.extract('(-?)(\d+)\.(\d+)', expand=True)
             if bool((strvals[0] == '-').any()):
                 field['unsigned'] = False
-            nx = int(strvals[1].str.len().max())
-            ny = int(strvals[2].str.len().max())
-            field['length'] = [nx, ny]
+
+            try:
+                nx = int(strvals[1].str.len().max())
+                ny = int(strvals[2].str.len().max())
+            except ValueError as err:
+                pass
+            else:
+                field['length'] = [nx+ny, ny]
+
+
     return newschema
 
 
@@ -90,7 +104,9 @@ def get_examples(df, schema):
             field['enumerations'] = sorted(values)
         else:
             if field['type'] == 'string':
-                field['examples'] = values[0:2] + values[-2:]
+                svals = sorted(values, key=lambda x: len(x))
+                _m = len(svals) // 2
+                field['examples'] = svals[0:2] + svals[_m:_m+1] + svals[-2:]
             elif field['type'] in ['integer', 'float', 'date', 'datetime']:
                 field['examples'] = [min(values), max(values), values[len(values) // 2]]
     return newschema
@@ -106,5 +122,5 @@ if __name__ == '__main__':
     schema = get_nulls(df, schema)
     schema = get_lengths(df, schema)
     schema = get_examples(df, schema)
-    print(rtyaml.dump(schema))
+    stdout.write(rtyaml.dump(schema))
 
